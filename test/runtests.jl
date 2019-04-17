@@ -24,6 +24,7 @@ include("solver.jl")
 include("fft.jl")
 include("rand.jl")
 include("sparse_solver.jl")
+include("special.jl")
 
 CuArrays.pool_status()
 CuArrays.pool_timings()

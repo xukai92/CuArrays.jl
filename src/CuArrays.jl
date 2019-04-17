@@ -8,7 +8,7 @@ using GPUArrays
 
 export CuArray, CuVector, CuMatrix, CuVecOrMat, cu, cuzeros, cuones, cufill
 
-import LinearAlgebra
+import LinearAlgebra, SpecialFunctions
 
 using Adapt
 
@@ -33,6 +33,7 @@ include("array.jl")
 include("subarray.jl")
 include("utils.jl")
 include("indexing.jl")
+include("special/gamma.jl")
 include("broadcast.jl")
 include("matmul.jl")
 include("mapreduce.jl")

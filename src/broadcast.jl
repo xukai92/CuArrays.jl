@@ -37,6 +37,11 @@ for f in libdevice
   @eval cufunc(::typeof(Base.$f)) = CUDAnative.$f
 end
 
+cufunc(::typeof(SpecialFunctions.lbeta)) = CuArrays.lbeta
+cufunc(::typeof(SpecialFunctions.lgamma)) = CuArrays.lgamma
+cufunc(::typeof(SpecialFunctions.digamma)) = CuArrays.digamma
+cufunc(::typeof(SpecialFunctions.trigamma)) = CuArrays.trigamma
+
 using MacroTools
 
 const _cufuncs = copy(libdevice)
