@@ -60,6 +60,4 @@ function trigamma(x)
   end
 end
 
-function lbeta(x, y)
-  return CUDAnative.lgamma(x) + CUDAnative.lgamma(y) - CUDAnative.lgamma(x + y)
-end
+lbeta(x, y) = lgamma(x) + lgamma(y) - lgamma(x + y)

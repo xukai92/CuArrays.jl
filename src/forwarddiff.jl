@@ -1,6 +1,6 @@
 # ForwardDiff integration
 
-byhand = [:lgamma, :digamma, :lbeta, :exp2, :log2, :exp10, :log10, :abs]
+byhand = [:exp2, :log2, :exp10, :log10, :abs]
 
 for f in libdevice
   if haskey(ForwardDiff.DiffRules.DEFINED_DIFFRULES, (:Base,f,1))
@@ -11,18 +11,6 @@ for f in libdevice
     eval(ForwardDiff.unary_dual_definition(:CUDAnative, f))
   end
 end
-
-# byhand: lgamma
-ForwardDiff.DiffRules.@define_diffrule CuArrays.lgamma(a) = :(CuArrays.digamma($a))
-eval(ForwardDiff.unary_dual_definition(:CuArrays, :lgamma))
-
-# byhand: digamma
-ForwardDiff.DiffRules.@define_diffrule CuArrays.digamma(a) = :(CuArrays.trigamma($a))
-eval(ForwardDiff.unary_dual_definition(:CuArrays, :digamma))
-
-# byhand: lbeta
-ForwardDiff.DiffRules.@define_diffrule CuArrays.lbeta(a, b) = :(CuArrays.digamma($a) - CuArrays.digamma($a + $b)), :(CuArrays.digamma($b) - CuArrays.digamma($a + $b))
-eval(ForwardDiff.binary_dual_definition(:CuArrays, :lbeta))
 
 # byhand: exp2
 ForwardDiff.DiffRules.DEFINED_DIFFRULES[(:CUDAnative, :exp2, 1)] = x ->
@@ -49,9 +37,20 @@ ForwardDiff.DiffRules.DEFINED_DIFFRULES[(:CUDAnative, :abs, 1)] = x ->
    :(signbit(x) ? -one(x) : one(x))
 eval(ForwardDiff.unary_dual_definition(:CUDAnative, :abs))
 
+# byhand: lgamma
+ForwardDiff.DiffRules.@define_diffrule CuArrays.lgamma(a) = :(CuArrays.digamma($a))
+eval(ForwardDiff.unary_dual_definition(:CuArrays, :lgamma))
 
-ForwardDiff.DiffRules.DEFINED_DIFFRULES[(:CUDAnative, :pow, 2)] = (x, y) ->
-  replace_device.(ForwardDiff.DiffRules.DEFINED_DIFFRULES[(:Base, :^, 2)](x, y))
+# byhand: digamma
+ForwardDiff.DiffRules.@define_diffrule CuArrays.digamma(a) = :(CuArrays.trigamma($a))
+eval(ForwardDiff.unary_dual_definition(:CuArrays, :digamma))
+
+# byhand: lbeta
+ForwardDiff.DiffRules.@define_diffrule CuArrays.lbeta(a, b) = :(CuArrays.digamma($a) - CuArrays.digamma($a + $b)), :(CuArrays.digamma($b) - CuArrays.digamma($a + $b))
+eval(ForwardDiff.binary_dual_definition(:CuArrays, :lbeta))
+
+ForwardDiff.DiffRules.DEFINED_DIFFRULES[(:CUDAnative, :pow, 2)] = 
+  (x, y) -> replace_device.(ForwardDiff.DiffRules.DEFINED_DIFFRULES[(:Base, :^, 2)](x, y))
 
 @eval begin
   ForwardDiff.@define_binary_dual_op(
