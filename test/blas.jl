@@ -2,12 +2,7 @@ using LinearAlgebra
 
 @testset "CUBLAS" begin
 
-if !isdefined(CuArrays, :CUBLAS)
-@warn "Not testing CUBLAS"
-else
 using CuArrays.CUBLAS
-@info "Testing CUBLAS $(CUBLAS.version())"
-
 using CuArrays.CUBLAS: band, bandex
 
 m = 20
@@ -27,7 +22,7 @@ CUBLAS.cublasSetMathMode(CUBLAS.CUBLAS_DEFAULT_MATH)
 #################
 
 @testset "Level 1 with element type $T" for T in [Float32, Float64, ComplexF32, ComplexF64]
-    A = CuArray(rand(T, m))
+    A = CuArrays.rand(T, m)
     B = CuArray{T}(undef, m)
     CuArrays.CUBLAS.blascopy!(m,A,1,B,1)
     @test Array(A) == Array(B)
@@ -43,6 +38,15 @@ CUBLAS.cublasSetMathMode(CUBLAS.CUBLAS_DEFAULT_MATH)
     if T <: Real
         @test testf(argmin, rand(T, m))
         @test testf(argmax, rand(T, m))
+    else
+        @test testf(BLAS.dotu, rand(T, m), rand(T, m))
+        x = rand(T, m)
+        y = rand(T, m)
+        dx = CuArray(x)
+        dy = CuArray(y)
+        dz = BLAS.dot(dx, dy)
+        z = BLAS.dotc(x, y)
+        @test dz ≈ z
     end
 end # level 1 testset
 
@@ -55,6 +59,16 @@ end # level 1 testset
             @test testf(*, rand(elty, m, n), rand(elty, n))
             @test testf(*, transpose(rand(elty, m, n)), rand(elty, m))
             @test testf(*, rand(elty, m, n)', rand(elty, m))
+            x = rand(elty, m)
+            A = rand(elty, m, m + 1 )
+            y = rand(elty, m)
+            dx = CuArray(x)
+            dA = CuArray(A)
+            dy = CuArray(y)
+            @test_throws DimensionMismatch mul!(dy, dA, dx)
+            A = rand(elty, m + 1, m )
+            dA = CuArray(A)
+            @test_throws DimensionMismatch mul!(dy, dA, dx)
         end
         @testset "banded methods" begin
             # bands
@@ -365,6 +379,8 @@ end # level 1 testset
             # compare
             @test C1 ≈ h_C1
             @test C2 ≈ h_C2
+            @test_throws ArgumentError mul!(dhA, dhA, dsA)
+            @test_throws DimensionMismatch mul!(d_C1, d_A, dsA)
         end
 
         @testset "gemm" begin
@@ -1105,6 +1121,6 @@ end # level 1 testset
             @test C ≈ h_C
         end
     end # extensions
-    end # elty
-    end # if CUBLAS
+end # elty
+
 end # cublas testset

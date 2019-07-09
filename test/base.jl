@@ -50,11 +50,11 @@ end
   @test Base.unsafe_wrap(CuArray{Nothing}, CU_NULL, (1,2))   == CuArray{Nothing,2}(buf, (1,2))
   @test Base.unsafe_wrap(CuArray{Nothing,2}, CU_NULL, (1,2)) == CuArray{Nothing,2}(buf, (1,2))
 
-  @test collect(cuzeros(2, 2)) == zeros(Float32, 2, 2)
-  @test collect(cuones(2, 2)) == ones(Float32, 2, 2)
+  @test collect(CuArrays.zeros(2, 2)) == zeros(Float32, 2, 2)
+  @test collect(CuArrays.ones(2, 2)) == ones(Float32, 2, 2)
 
-  @test collect(cufill(0, 2, 2)) == zeros(Float32, 2, 2)
-  @test collect(cufill(1, 2, 2)) == ones(Float32, 2, 2)
+  @test collect(CuArrays.fill(0, 2, 2)) == zeros(Float32, 2, 2)
+  @test collect(CuArrays.fill(1, 2, 2)) == ones(Float32, 2, 2)
 end
 
 @testset "Adapt" begin
@@ -70,6 +70,14 @@ end
   @test testf((x)       -> sin.(x),      rand(2, 3))
   @test testf((x)       -> log.(x) .+ 1, rand(2, 3))
   @test testf((x)       -> 2x,           rand(2, 3))
+  @test testf((x)       -> x .^ 0,      rand(2, 3))
+  @test testf((x)       -> x .^ 1,      rand(2, 3))
+  @test testf((x)       -> x .^ 2,      rand(2, 3))
+  @test testf((x)       -> x .^ 3,      rand(2, 3))
+  @test testf((x)       -> x .^ 5,      rand(2, 3))
+  @test testf((x)       -> (z = Int32(5); x .^ z),      rand(2, 3))
+  @test testf((x)       -> (z = Float64(π); x .^ z),      rand(2, 3))
+  @test testf((x)       -> (z = Float32(π); x .^ z),      rand(Float32, 2, 3))
   @test testf((x, y)    -> x .+ y,       rand(2, 3), rand(1, 3))
   @test testf((z, x, y) -> z .= x .+ y,  rand(2, 3), rand(2, 3), rand(2))
   @test (CuArray{Ptr{Cvoid}}(undef, 1) .= C_NULL) == CuArray([C_NULL])
@@ -82,20 +90,25 @@ end
 end
 
 @testset "Cufunc" begin
-  gelu(x) = oftype(x, 0.5) * x * (1 + tanh(oftype(x, √(2/π))*(x + oftype(x, 0.044715) * x^3)))
+  gelu1(x) = oftype(x, 0.5) * x * (1 + tanh(oftype(x, √(2/π))*(x + oftype(x, 0.044715) * x^3)))
   sig(x) = one(x) / (one(x) + exp(-x))
-  f(x) = gelu(log(x)) * sig(x) * tanh(x)
+  f(x) = gelu1(log(x)) * sig(x) * tanh(x)
+  g(x) = x^7 - 2 * x^f(x^2) + 3
 
-  CuArrays.@cufunc gelu(x) = oftype(x, 0.5) * x * (1 + tanh(oftype(x, √(2/π))*(x + oftype(x, 0.044715) * x^3)))
+
+  CuArrays.@cufunc gelu1(x) = oftype(x, 0.5) * x * (1 + tanh(oftype(x, √(2/π))*(x + oftype(x, 0.044715) * x^3)))
   CuArrays.@cufunc sig(x) = one(x) / (one(x) + exp(-x))
-  CuArrays.@cufunc f(x) = gelu(log(x)) * sig(x) * tanh(x)
+  CuArrays.@cufunc f(x) = gelu1(log(x)) * sig(x) * tanh(x)
+  CuArrays.@cufunc g(x) = x^7 - 2 * x^f(x^2) + 3
 
-  @test :gelu ∈ CuArrays.cufuncs()
+  @test :gelu1 ∈ CuArrays.cufuncs()
   @test :sig ∈ CuArrays.cufuncs()
   @test :f ∈ CuArrays.cufuncs()
-  @test testf((x)  -> gelu.(x), rand(3,3))
+  @test :g ∈ CuArrays.cufuncs()
+  @test testf((x)  -> gelu1.(x), rand(3,3))
   @test testf((x)  -> sig.(x),  rand(3,3))
   @test testf((x)  -> f.(x),    rand(3,3))
+  @test testf((x)  -> g.(x),    rand(3,3))
 end
 
 # https://github.com/JuliaGPU/CUDAnative.jl/issues/223
@@ -230,4 +243,47 @@ end
   @test testf(x -> filter(y->y .> 0.5, x), rand(2))
   @test testf(x -> filter(y->y .> 0.5, x), rand(2,2))
   @test testf(x -> filter(y->y .> 0.5, x), rand(2,2,2))
+end
+
+@testset "generic fallbacks" begin
+    a = rand(Int8, 3, 3)
+    b = rand(Int8, 3, 3)
+    d_a = CuArray{Int8}(a)
+    d_b = CuArray{Int8}(b)
+    d_c = d_a*d_b
+    @test collect(d_c) == a*b
+    a = rand(Complex{Int8}, 3, 3)
+    b = rand(Complex{Int8}, 3, 3)
+    d_a = CuArray{Complex{Int8}}(a)
+    d_b = CuArray{Complex{Int8}}(b)
+    d_c = d_a'*d_b
+    @test collect(d_c) == a'*b
+    d_c = d_a*d_b'
+    @test collect(d_c) == a*b'
+    d_c = d_a'*d_b'
+    @test collect(d_c) == a'*b'
+    d_c = transpose(d_a)*d_b'
+    @test collect(d_c) == transpose(a)*b'
+    d_c = d_a'*transpose(d_b)
+    @test collect(d_c) == a'*transpose(b)
+    d_c = transpose(d_a)*d_b
+    @test collect(d_c) == transpose(a)*b
+    d_c = d_a*transpose(d_b)
+    @test collect(d_c) == a*transpose(b)
+    d_c = transpose(d_a)*transpose(d_b)
+    @test collect(d_c) == transpose(a)*transpose(b)
+    d_c = rmul!(copy(d_a), Complex{Int8}(2, 2))
+    @test collect(d_c) == a*Complex{Int8}(2, 2)
+    d_c = lmul!(Complex{Int8}(2, 2), copy(d_a))
+    @test collect(d_c) == Complex{Int8}(2, 2)*a
+end
+
+@testset "reverse" begin
+    @test testf(x->reverse(x), rand(1000))
+    @test testf(x->reverse(x, 10), rand(1000))
+    @test testf(x->reverse(x, 10, 90), rand(1000))
+
+    @test testf(x->reverse!(x), rand(1000))
+    @test testf(x->reverse!(x, 10), rand(1000))
+    @test testf(x->reverse!(x, 10, 90), rand(1000))
 end

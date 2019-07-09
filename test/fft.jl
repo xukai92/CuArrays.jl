@@ -1,15 +1,11 @@
 @testset "CUFFT" begin
 
-if !isdefined(CuArrays, :CUFFT)
-@warn "Not testing CUFFT"
-else
 using CuArrays.CUFFT
-@info "Testing CUFFT $(CUFFT.version())"
+
+using FFTW
 
 # notes:
 #   plan_bfft does not need separate testing since it is used by plan_ifft
-
-using FFTW
 
 N1 = 8
 N2 = 32
@@ -278,6 +274,11 @@ end
 
 end # testset int FFT
 
+@testset "streams" begin
+    X = rand(N1)
+    d_X = CuArray(X)
+    p = plan_fft(d_X)
+    CUFFT.set_stream(p, CUDAdrv.CuDefaultStream())
 end
 
 end

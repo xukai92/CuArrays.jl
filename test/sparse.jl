@@ -1,10 +1,6 @@
 @testset "CUSPARSE" begin
 
-if !isdefined(CuArrays, :CUSPARSE)
-@warn "Not testing CUSPARSE"
-else
 using CuArrays.CUSPARSE
-@info "Testing CUSPARSE $(CUSPARSE.version())"
 
 using LinearAlgebra
 using SparseArrays
@@ -15,6 +11,13 @@ k = 10
 blockdim = 5
 
 @testset "util" begin
+    x = sprand(m,0.2)
+    d_x = CuSparseVector(x)
+    @test length(d_x) == m
+    @test size(d_x)   == (m, 1)
+    @test size(d_x,1) == m
+    @test size(d_x,2) == 1
+    @test ndims(d_x)  == 1
     x = sprand(m,n,0.2)
     d_x = CuSparseMatrixCSC(x)
     @test length(d_x) == m*n
@@ -22,7 +25,11 @@ blockdim = 5
     @test size(d_x,1) == m
     @test size(d_x,2) == n
     @test size(d_x,3) == 1
+    @test ndims(d_x)  == 2
+    @test !issymmetric(d_x)
+    @test !ishermitian(d_x)
     @test_throws ArgumentError size(d_x,0)
+    @test_throws ArgumentError CUSPARSE.CuSparseVector(x)
     y = sprand(k,n,0.2)
     d_y = CuSparseMatrixCSC(y)
     @test_throws ArgumentError copyto!(d_y,d_x)
@@ -269,7 +276,7 @@ end
             h_Y = collect(d_X)
             Y = A\(alpha * X)
             @test Y ≈ h_Y
-            d_X = CuArray(rand(elty,n,n))
+            d_X = CuArrays.rand(elty,n,n)
             @test_throws DimensionMismatch CUSPARSE.bsrsm2!('N','N',alpha,d_A,d_X,'O')
             @test_throws DimensionMismatch CUSPARSE.bsrsm2!('N','T',alpha,d_A,d_X,'O')
             A = sparse(rand(elty,m,n))
@@ -311,7 +318,7 @@ end
             h_Y = collect(d_X)
             Y = A\(alpha * X)
             @test Y ≈ h_Y
-            d_X = CuArray(rand(elty,n))
+            d_X = CuArrays.rand(elty,n)
             @test_throws DimensionMismatch CUSPARSE.sv2!('N','U',alpha,d_A,d_X,'O')
             A = sparse(rand(elty,m,n))
             d_A = CuSparseMatrixCSR(A)
@@ -322,6 +329,7 @@ end
         @testset "bsrsv2" begin
             A = rand(elty,m,m)
             A = triu(A)
+            Al = tril(A)
             X = rand(elty,m)
             alpha = rand(elty)
             d_X = CuArray(X)
@@ -331,9 +339,24 @@ end
             h_Y = collect(d_Y)
             Y = A\(alpha * X)
             @test Y ≈ h_Y
-            #=d_Y = UpperTriangular(d_A)\d_X
+            d_Y = UpperTriangular(d_A)\d_X
             h_Y = collect(d_Y)
-            @test h_Y ≈ A\X=#
+            @test h_Y ≈ A\X
+            #=d_Y = UpperTriangular(d_A)'\d_X
+            h_Y = collect(d_Y)
+            @test h_Y ≈ A'\X=#
+            d_Y = transpose(UpperTriangular(d_A))\d_X
+            h_Y = collect(d_Y)
+            @test h_Y ≈ transpose(A)\X
+            d_Y = LowerTriangular(d_A)\d_X
+            h_Y = collect(d_Y)
+            @test h_Y ≈ Al\X
+            #=d_Y = LowerTriangular(d_A)'\d_X
+            h_Y = collect(d_Y)
+            @test h_Y ≈ A'\X=#
+            d_Y = transpose(LowerTriangular(d_A))\d_X
+            h_Y = collect(d_Y)
+            @test h_Y ≈ transpose(Al)\X
             A = sparse(rand(elty,m,n))
             d_A = CuSparseMatrixCSR(A)
             d_A = CUSPARSE.switch2bsr(d_A, convert(Cint,5))
@@ -513,15 +536,15 @@ end
             h_y = collect(d_y)
             y = A\X
             @test y ≈ h_y
-            d_y = UpperTriangular(d_A)'\d_X
+            #=d_y = UpperTriangular(d_A)'\d_X
             h_y = collect(d_y)
-            y = A'\X
+            y = A'\X=#
             @test y ≈ h_y
             d_y = transpose(UpperTriangular(d_A))\d_X
             h_y = collect(d_y)
             y = transpose(A)\X
             @test y ≈ h_y
-            d_X = CuArray(rand(elty,n,n))
+            d_X = CuArrays.rand(elty,n,n)
             @test_throws DimensionMismatch CUSPARSE.sm_solve('N','U',alpha,d_A,d_X,info,'O')
             A = sparse(rand(elty,m,n))
             d_A = CuSparseMatrixCSR(A)
@@ -554,7 +577,7 @@ end
             h_y = collect(d_y)
             y = transpose(A)\X
             @test y ≈ h_y
-            d_X = CuArray(rand(elty,n,n))
+            d_X = CuArrays.rand(elty,n,n)
             @test_throws DimensionMismatch CUSPARSE.sm_solve('N','U',alpha,d_A,d_X,info,'O')
             A = sparse(rand(elty,m,n))
             d_A = CuSparseMatrixCSC(A)
@@ -611,6 +634,7 @@ end
         @testset "csrsv2" begin
             A = rand(elty,m,m)
             A = triu(A)
+            Al = tril(A)
             X = rand(elty,m)
             alpha = rand(elty)
             d_X = CuArray(X)
@@ -627,10 +651,22 @@ end
             h_y = collect(d_y)
             y = transpose(A)\X
             @test y ≈ h_y
-            d_y = UpperTriangular(d_A)'\d_X
+            #=d_y = UpperTriangular(d_A)'\d_X
             h_y = collect(d_y)
             y = A'\X
+            @test y ≈ h_y=#
+            d_y = LowerTriangular(d_A)\d_X
+            h_y = collect(d_y)
+            y = Al\X
             @test y ≈ h_y
+            d_y = transpose(LowerTriangular(d_A))\d_X
+            h_y = collect(d_y)
+            y = transpose(Al)\X
+            @test y ≈ h_y
+            #=d_y = LowerTriangular(d_A)'\d_X
+            h_y = collect(d_y)
+            y = A'\X
+            @test y ≈ h_y=#
             A = sparse(rand(elty,m,n))
             d_A = CuSparseMatrixCSR(A)
             @test_throws DimensionMismatch CUSPARSE.sv2('N','U',alpha,d_A,d_X,'O')
@@ -639,6 +675,7 @@ end
         @testset "cscsv2" begin
             A = rand(elty,m,m)
             A = triu(A)
+            Al = tril(A)
             X = rand(elty,m)
             alpha = rand(elty)
             d_X = CuArray(X)
@@ -658,6 +695,14 @@ end
             d_y = transpose(UpperTriangular(d_A))\d_X
             h_y = collect(d_y)
             y = transpose(A)\X
+            @test y ≈ h_y
+            d_y = LowerTriangular(d_A)\d_X
+            h_y = collect(d_y)
+            y = Al\X
+            @test y ≈ h_y
+            d_y = transpose(LowerTriangular(d_A))\d_X
+            h_y = collect(d_y)
+            y = transpose(Al)\X
             @test y ≈ h_y
             #=d_y = UpperTriangular(d_A)'\d_X
             h_y = collect(d_y)
@@ -1030,7 +1075,7 @@ end
         h_y = collect(d_y)
         @test h_y ≈ A\x=#
 
-        d_x = CuArray(rand(elty,n))
+        d_x = CuArrays.rand(elty,n)
         info = CUSPARSE.sv_analysis('N','T','U',d_A,'O')
         @test_throws DimensionMismatch CUSPARSE.sv_solve('N','U',alpha,d_A,d_x,info,'O')
         A = sparse(rand(elty,m,n))
@@ -1137,7 +1182,7 @@ end
             h_C = collect(d_C)
             D = transpose(A) * B
             @test D ≈ h_C
-            d_B = CuArray(rand(elty,k,n))
+            d_B = CuArrays.rand(elty,k,n)
             @test_throws DimensionMismatch CUSPARSE.mm!('T',alpha,d_A,d_B,beta,d_C,'O')
             @test_throws DimensionMismatch CUSPARSE.mm!('N',alpha,d_A,d_B,beta,d_B,'O')
         end
@@ -1153,7 +1198,7 @@ end
             h_C = collect(d_C)
             D = transpose(A) * B
             @test D ≈ h_C
-            d_B = CuArray(rand(elty,k,n))
+            d_B = CuArrays.rand(elty,k,n)
             @test_throws DimensionMismatch CUSPARSE.mm!('T',alpha,d_A,d_B,beta,d_C,'O')
             @test_throws DimensionMismatch CUSPARSE.mm!('N',alpha,d_A,d_B,beta,d_B,'O')
         end
@@ -1175,7 +1220,7 @@ end
             h_C = collect(d_C)
             D = alpha * A * B + beta * C
             @test D ≈ h_C
-            d_B = CuArray(rand(elty,k,n))
+            d_B = CuArrays.rand(elty,k,n)
             @test_throws DimensionMismatch CUSPARSE.mm!('T',alpha,d_A,d_B,beta,d_C,'O')
             @test_throws DimensionMismatch CUSPARSE.mm!('N',alpha,d_A,d_B,beta,d_B,'O')
         end
@@ -1187,7 +1232,7 @@ end
             h_C = collect(d_C)
             D = alpha * A * B + beta * C
             @test D ≈ h_C
-            d_B = CuArray(rand(elty,k,n))
+            d_B = CuArrays.rand(elty,k,n)
             @test_throws DimensionMismatch CUSPARSE.mm!('T',alpha,d_A,d_B,beta,d_C,'O')
             @test_throws DimensionMismatch CUSPARSE.mm!('N',alpha,d_A,d_B,beta,d_B,'O')
         end
@@ -1910,8 +1955,6 @@ end
             @test h_w ≈ w
         end
     end
-end
-
 end
 
 end
