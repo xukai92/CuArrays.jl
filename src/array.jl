@@ -20,8 +20,8 @@ end
 CuVector{T} = CuArray{T,1}
 CuMatrix{T} = CuArray{T,2}
 CuVecOrMat{T} = Union{CuVector{T},CuMatrix{T}}
-CuMatOrAdj{T} = Union{CuMatrix, LinearAlgebra.Adjoint{T, CuMatrix{T}}, LinearAlgebra.Transpose{T, CuMatrix{T}}}
-CuOrAdj{T} = Union{CuVecOrMat, LinearAlgebra.Adjoint{T, CuVecOrMat{T}}, LinearAlgebra.Transpose{T, CuVecOrMat{T}}}
+CuMatOrAdj{T} = Union{CuMatrix, LinearAlgebra.Adjoint{T, <:CuMatrix{T}}, LinearAlgebra.Transpose{T, <:CuMatrix{T}}}
+CuOrAdj{T} = Union{CuVecOrMat, LinearAlgebra.Adjoint{T, <:CuVecOrMat{T}}, LinearAlgebra.Transpose{T, <:CuVecOrMat{T}}}
 
 
 const INVALID = Mem.alloc(Mem.Device, 0)
