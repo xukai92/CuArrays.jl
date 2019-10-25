@@ -1,4 +1,8 @@
 ## generic linear algebra routines
+CuMatOrAdj{T} = Union{CuMatrix, LinearAlgebra.Adjoint{T, <:CuMatrix{T}}, LinearAlgebra.Transpose{T, <:CuMatrix{T}}}
+CuOrAdj{T} = Union{CuVecOrMat, LinearAlgebra.Adjoint{T, <:CuVecOrMat{T}}, LinearAlgebra.Transpose{T, <:CuVecOrMat{T}}}
+
+
 
 function LinearAlgebra.tril!(A::CuMatrix{T}, d::Integer = 0) where T
   function kernel!(_A, _d)
