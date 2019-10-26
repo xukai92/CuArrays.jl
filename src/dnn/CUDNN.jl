@@ -36,6 +36,8 @@ function handle()
     return _handle[]
 end
 
+isdeterministic() = true
+
 include("base.jl")
 include("libcudnn.jl")
 
