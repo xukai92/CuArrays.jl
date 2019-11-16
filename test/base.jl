@@ -4,6 +4,8 @@ using Adapt: adapt
 import CUDAdrv
 import CUDAdrv: CuPtr, CU_NULL
 
+@test CuArrays.functional()
+
 @testset "Memory" begin
   CuArrays.alloc(0)
 
@@ -372,6 +374,53 @@ end
 end
 
 @testset "findall" begin
+    # 1D
     @test testf(x->findall(x), rand(Bool, 100))
     @test testf(x->findall(y->y>0.5, x), rand(100))
+
+    # ND
+    let x = rand(Bool, 10, 10)
+      @test findall(x) == Array(findall(CuArray(x)))
+    end
+    let x = rand(10, 10)
+      @test findall(y->y>0.5, x) == Array(findall(y->y>0.5, CuArray(x)))
+    end
+end
+
+@testset "findfirst" begin
+    # 1D
+    @test testf(x->findfirst(x), rand(Bool, 100))
+    @test testf(x->findfirst(y->y>0.5, x), rand(100))
+
+    # ND
+    let x = rand(Bool, 10, 10)
+      @test findfirst(x) == findfirst(CuArray(x))
+    end
+    let x = rand(10, 10)
+      @test findfirst(y->y>0.5, x) == findfirst(y->y>0.5, CuArray(x))
+    end
+end
+
+@testset "findmax & findmin" begin
+  let x = rand(Float32, 100)
+      @test findmax(x) == findmax(CuArray(x))
+  end
+  let x = rand(Float32, 10, 10)
+      @test findmax(x) == findmax(CuArray(x))
+  end
+
+  let x = rand(Float32, 100)
+      @test findmin(x) == findmin(CuArray(x))
+  end
+  let x = rand(Float32, 10, 10)
+      @test findmin(x) == findmin(CuArray(x))
+  end
+end
+
+@testset "argmax & argmin" begin
+    @test testf(argmax, rand(Int, 10))
+    @test testf(argmax, -rand(Int, 10))
+
+    @test testf(argmin, rand(Int, 10))
+    @test testf(argmin, -rand(Int, 10))
 end
