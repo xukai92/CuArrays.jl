@@ -60,7 +60,10 @@ end
 function ∇conv_filter!(dw::CuArray{T}, x::CuArray{T}, dy::CuArray{T},
                        cdims::DenseConvDims; alpha=1, algo=isdeterministic() ? 1 : 0) where T<:CUDNNFloat
   if isdeterministic()
-    @assert algo != 0 "algorithm 0 (CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0) is not deterministic"
+    if algo == 0
+      @warn "algorithm 0 (CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0) is not deterministic; algorithm 1 is used instead"
+      algo = 1
+    end
   end
 
   if version() < v"6"
@@ -80,7 +83,9 @@ end
 function ∇conv_data!(dx::CuArray{T}, dy::CuArray{T}, w::CuArray{T},
                      cdims::DenseConvDims; alpha=1, algo=isdeterministic() ? 1 : 0) where T<:CUDNNFloat
   if isdeterministic()
-    @assert algo != 0 "algorithm 0 (CUDNN_CONVOLUTION_BWD_DATA_ALGO_0) is not deterministic"
+    if algo == 0
+      @warn "algorithm 0 (CUDNN_CONVOLUTION_BWD_DATA_ALGO_0) is not deterministic; algorithm 1 is used instead"
+    end
   end
 
   if version() < v"6"
@@ -102,7 +107,9 @@ end
 # https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnPoolingMode_t
 function maxpool!(y::CuArray{T}, x::CuArray{T}, pdims::PoolDims; mode=isdeterministic() ? 3 : 0) where T<:CUDNNFloat
   if isdeterministic()
-    @assert mode == 3 "only mode 3 (CUDNN_POOLING_MAX_DETERMINISTIC) is deterministic"
+    if model != 3
+      @warn "mode $mode is not deterministic; mode 3 (CUDNN_POOLING_MAX_DETERMINISTIC) is used instead"
+    end
   end
   return cudnnPoolingForward(y, x, pdims; mode=mode)
 end
@@ -110,7 +117,9 @@ end
 function ∇maxpool!(dx::CuArray{T}, dy::CuArray{T}, y::CuArray{T}, x::CuArray{T},
           pdims::PoolDims, mode=isdeterministic() ? 3 : 0) where T<:CUDNNFloat
   if isdeterministic()
-    @assert mode == 3 "only mode 3 (CUDNN_POOLING_MAX_DETERMINISTIC) is deterministic"
+    if model != 3
+      @warn "mode $mode is not deterministic; mode 3 (CUDNN_POOLING_MAX_DETERMINISTIC) is used instead"
+    end
   end
   return cudnnPoolingBackward(dx, dy, x, y, pdims, mode=mode)
 end
