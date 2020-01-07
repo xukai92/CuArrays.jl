@@ -16,7 +16,10 @@ import ..CuArrays.unsafe_free!
 
 import NNlib
 
-isdeterministic() = true
+const deterministic = Ref(true)
+
+isdeterministic() = deterministic[]
+deterministic!(flag) = (deterministic[] = flag)
 
 const libcudnn = if Sys.iswindows()
     # no ccall by soname, we need the filename
