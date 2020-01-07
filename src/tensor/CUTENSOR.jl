@@ -1,31 +1,20 @@
 module CUTENSOR
 
 using ..CuArrays
-using ..CuArrays: active_context
+using ..CuArrays: @argout, @workspace
 
 using CUDAapi
 
 using CUDAdrv
 using CUDAdrv: CUstream
 
+using CUDAnative
+
 using CEnum
+
 const cudaDataType_t = cudaDataType
 
-const libcutensor = if Sys.iswindows()
-    # no ccall by soname, we need the filename
-    # NOTE: we discover the full path here, while only the wordsize and toolkit versions
-    #       would have been enough to construct "cutensor64_10.dll"
-    toolkit = find_toolkit()
-    path = find_cuda_library("cutensor", toolkit)
-    if path === nothing
-        nothing
-    else
-        basename(path)
-    end
-else
-    # ccall by soname; CuArrays.__init__ will have populated Libdl.DL_LOAD_PATH
-    "libcutensor"
-end
+const libcutensor = Ref("libcutensor")
 
 # core library
 include("libcutensor_common.jl")
@@ -39,20 +28,30 @@ include("wrappers.jl")
 # high-level integrations
 include("interfaces.jl")
 
-const _handles = Dict{CuContext,cutensorHandle_t}()
-const _handle = Ref{cutensorHandle_t}(C_NULL)
+const created_handles = IdDict{CuContext,Ref{cutensorHandle_t}}()
+const active_handles = Vector{Union{Nothing,Ref{cutensorHandle_t}}}()
 
 function handle()
-    if _handle[] == C_NULL
-        @assert isassigned(active_context) # some other call should have initialized CUDA
-        _handle[] = get!(_handles, active_context[]) do
-            context = active_context[]
-            handle = cutensorCreate()
-            atexit(()->CUDAdrv.isvalid(context) && cutensorDestroy(handle))
+    tid = Threads.threadid()
+    if @inbounds active_handles[tid] === nothing
+        ctx = context()
+        active_handles[tid] = get!(created_handles, ctx) do
+            handle = Ref{cutensorHandle_t}()
+            cutensorInit(handle)
             handle
         end
     end
-    return _handle[]
+    @inbounds active_handles[tid]
+end
+
+function __init__()
+    resize!(active_handles, Threads.nthreads())
+    fill!(active_handles, nothing)
+
+    CUDAnative.atcontextswitch() do tid, ctx
+        # we don't eagerly initialize handles, but do so lazily when requested
+        active_handles[tid] = nothing
+    end
 end
 
 end

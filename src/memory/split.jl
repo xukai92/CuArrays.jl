@@ -268,9 +268,7 @@ const HUGE  = 3
 
 # sorted containers need unique keys, which the size of a block isn't.
 # mix in the block address to keep the key sortable, but unique.
-# the size is shifted 24 bits, and as many identifier bits are
-# mixed in, supporting 16777216 unique allocations of up to 1 TiB.
-unique_sizeof(block::Block) = (UInt64(sizeof(block))<<24) | (UInt64(block.id) & (2<<24-1))
+unique_sizeof(block::Block) = (UInt128(sizeof(block))<<64) | UInt64(block.id)
 const UniqueIncreasingSize = Base.By(unique_sizeof)
 
 const available_small = SortedSet{Block}(UniqueIncreasingSize)
@@ -303,7 +301,7 @@ end
 function pool_alloc(sz)
     szclass = size_class(sz)
 
-    # round of the block size
+    # round off the block size
     req_sz = sz
     roundoff = if szclass == SMALL
         SMALL_ROUNDOFF
@@ -402,23 +400,6 @@ end
 
 init() = return
 
-function deinit()
-    @assert isempty(allocated) "Cannot deinitialize memory pool with outstanding allocations"
-
-    repopulate(freed)
-    incremental_compact!(Set(freed))
-    empty!(freed)
-
-    for available in (available_small, available_large, available_huge)
-        while !isempty(available)
-            block = pop!(available)
-            actual_free(block)
-        end
-    end
-
-    return
-end
-
 function alloc(sz)
     block = pool_alloc(sz)
     if block !== nothing
@@ -438,6 +419,22 @@ function free(ptr)
     delete!(allocated, ptr)
     pool_free(block)
     return
+end
+
+function reclaim(sz::Int=typemax(Int))
+    if !isempty(freed)
+        blocks = Set(freed)
+        empty!(freed)
+        repopulate(blocks)
+        incremental_compact!(blocks)
+    end
+
+    freed_sz = 0
+    for available in (available_huge, available_large, available_small)
+        freed_sz >= sz && break
+        freed_sz += reclaim!(available, sz-freed_sz)
+    end
+    return freed_sz
 end
 
 used_memory() = mapreduce(sizeof, +, values(allocated); init=0)

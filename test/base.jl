@@ -6,6 +6,16 @@ import CUDAdrv: CuPtr, CU_NULL
 
 @test CuArrays.functional()
 
+@testset "essential utilities" begin
+  f() = 1
+  f(a) = 2
+  f(a,b) = 3
+
+  @test CuArrays.@argout(f()) == nothing
+  @test CuArrays.@argout(f(out(4))) == 4
+  @test CuArrays.@argout(f(out(5), out(6))) == (5,6)
+end
+
 @testset "Memory" begin
   CuArrays.alloc(0)
 
@@ -29,6 +39,9 @@ end
   @test cu(1:3) === 1:3
   @test Base.elsize(xs) == sizeof(Int)
   @test CuArray{Int, 2}(xs) === xs
+  @test cu(Array{Float64,1}) == CuArray{Float64,1, Nothing}
+  @test cu(Array{Float64,4}) == CuArray{Float64,4, Nothing}
+  @test cu(Array{Float64}) == CuArray{Float64}
 
   @test_throws ArgumentError Base.unsafe_convert(Ptr{Int}, xs)
   @test_throws ArgumentError Base.unsafe_convert(Ptr{Float32}, xs)
@@ -163,7 +176,7 @@ end
   if VERSION >= v"1.3-"
     # broken test that throws
     # https://github.com/JuliaGPU/GPUArrays.jl/issues/204
-    @test_throws CUDAnative.InvalidIRError x /= 2
+    @test_throws ErrorException x /= 2
   else
     x /= 2
     @test collect(x)[] == 0.5
@@ -404,16 +417,20 @@ end
 @testset "findmax & findmin" begin
   let x = rand(Float32, 100)
       @test findmax(x) == findmax(CuArray(x))
+      @test findmax(x; dims=1) == Array.(findmax(CuArray(x); dims=1))
   end
   let x = rand(Float32, 10, 10)
       @test findmax(x) == findmax(CuArray(x))
+      @test findmax(x; dims=1) == Array.(findmax(CuArray(x); dims=1))
   end
 
   let x = rand(Float32, 100)
       @test findmin(x) == findmin(CuArray(x))
+      @test findmin(x; dims=1) == Array.(findmin(CuArray(x); dims=1))
   end
   let x = rand(Float32, 10, 10)
       @test findmin(x) == findmin(CuArray(x))
+      @test findmin(x; dims=1) == Array.(findmin(CuArray(x); dims=1))
   end
 end
 
@@ -423,4 +440,35 @@ end
 
     @test testf(argmin, rand(Int, 10))
     @test testf(argmin, -rand(Int, 10))
+end
+
+@testset "issue #543" begin
+  x = CuArrays.rand(ComplexF32, 1)
+  @test x isa CuArray{Complex{Float32}}
+
+  y = exp.(x)
+  @test y isa CuArray{Complex{Float32}}
+end
+
+@testset "resizing" begin
+    a = CuArray([1,2,3])
+
+    resize!(a, 3)
+    @test length(a) == 3
+    @test Array(a) == [1,2,3]
+
+    resize!(a, 5)
+    @test length(a) == 5
+    @test Array(a)[1:3] == [1,2,3]
+
+    resize!(a, 2)
+    @test length(a) == 2
+    @test Array(a)[1:2] == [1,2]
+
+    b = view(a, 1:2)
+    @test_throws ErrorException resize!(a, 2)
+    @test_throws ErrorException resize!(b, 2)
+
+    c = unsafe_wrap(CuArray{Int}, pointer(b), 2)
+    @test_throws ErrorException resize!(c, 2)
 end

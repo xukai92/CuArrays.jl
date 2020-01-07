@@ -18,7 +18,7 @@ end
 
 # primary array
 function CuArray{T,N}(ptr::CuPtr{T}, dims::Dims{N}, pooled::Bool=true;
-                      ctx=CuCurrentContext()) where {T,N}
+                      ctx=context()) where {T,N}
   self = CuArray{T,N,Nothing}(ptr, dims, nothing, pooled, ctx)
   retain(self)
   finalizer(unsafe_free!, self)
@@ -27,7 +27,7 @@ end
 
 # derived array (e.g. view, reinterpret, ...)
 function CuArray{T,N}(ptr::CuPtr{T}, dims::Dims{N}, parent::P) where {T,N,P<:CuArray}
-  self = CuArray{T,N,P}(ptr, dims, parent, false, parent.ctx)
+  self = CuArray{T,N,P}(ptr, dims, parent, parent.pooled, parent.ctx)
   retain(self)
   retain(parent)
   finalizer(unsafe_free!, self)
@@ -87,6 +87,8 @@ CuVecOrMat{T} = Union{CuVector{T},CuMatrix{T}}
 
 # type and dimensionality specified, accepting dims as tuples of Ints
 function CuArray{T,N}(::UndefInitializer, dims::Dims{N}) where {T,N}
+  Base.isbitsunion(T) && error("CuArray does not yet support union bits types")
+  Base.isbitstype(T)  || error("CuArray only supports bits types") # allocatedinline on 1.3+
   ptr = alloc(prod(dims) * sizeof(T))
   CuArray{T,N}(convert(CuPtr{T}, ptr), dims)
 end
@@ -123,7 +125,7 @@ Base.similar(a::CuArray, ::Type{T}, dims::Base.Dims{N}) where {T,N} = CuArray{T,
 
 
 """
-  unsafe_wrap(::CuArray, ptr::CuPtr{T}, dims; own=false, ctx=CuCurrentContext())
+  unsafe_wrap(::CuArray, ptr::CuPtr{T}, dims; own=false, ctx=context())
 
 Wrap a `CuArray` object around the data at the address given by `ptr`. The pointer
 element type `T` determines the array element type. `dims` is either an integer (for a 1d
@@ -133,7 +135,7 @@ take ownership of the memory, calling `cudaFree` when the array is no longer ref
 """
 function Base.unsafe_wrap(::Union{Type{CuArray},Type{CuArray{T}},Type{CuArray{T,N}}},
                           p::CuPtr{T}, dims::NTuple{N,Int};
-                          own::Bool=false, ctx::CuContext=CuCurrentContext()) where {T,N}
+                          own::Bool=false, ctx::CuContext=context()) where {T,N}
   xs = CuArray{T, length(dims)}(p, dims, false; ctx=ctx)
   if own
     base = convert(CuPtr{Cvoid}, p)
@@ -149,7 +151,7 @@ end
 
 function Base.unsafe_wrap(Atype::Union{Type{CuArray},Type{CuArray{T}},Type{CuArray{T,1}}},
                           p::CuPtr{T}, dim::Integer;
-                          own::Bool=false, ctx::CuContext=CuCurrentContext()) where {T}
+                          own::Bool=false, ctx::CuContext=context()) where {T}
   unsafe_wrap(Atype, p, (dim,); own=own, ctx=ctx)
 end
 
@@ -172,14 +174,11 @@ Base.pointer(x::CuArray, i::Integer) = x.ptr + (i-1) * Base.elsize(x)
 
 @inline function CuArray{T,N}(xs::AbstractArray{T,N}) where {T,N}
   A = CuArray{T,N}(undef, size(xs))
-  if isbits(xs)
-    A .= xs
-  else
-    copyto!(A, collect(xs))
-  end
+  copyto!(A, xs)
   return A
 end
 
+# FIXME: `map(T, xs)`, https://github.com/FluxML/Flux.jl/issues/958
 CuArray{T,N}(xs::AbstractArray{S,N}) where {T,N,S} = CuArray{T,N}((x -> T(x)).(xs))
 
 # underspecified constructors
@@ -251,7 +250,7 @@ function Base.copyto!(dest::CuArray{T}, doffs::Integer, src::Array{T}, soffs::In
   @boundscheck checkbounds(dest, doffs+n-1)
   @boundscheck checkbounds(src, soffs)
   @boundscheck checkbounds(src, soffs+n-1)
-  unsafe_copyto!(pointer(dest, doffs), pointer(src, soffs), n)
+  unsafe_copyto!(dest, doffs, src, soffs, n)
   return dest
 end
 
@@ -262,7 +261,7 @@ function Base.copyto!(dest::Array{T}, doffs::Integer, src::CuArray{T}, soffs::In
   @boundscheck checkbounds(dest, doffs+n-1)
   @boundscheck checkbounds(src, soffs)
   @boundscheck checkbounds(src, soffs+n-1)
-  unsafe_copyto!(pointer(dest, doffs), pointer(src, soffs), n)
+  unsafe_copyto!(dest, doffs, src, soffs, n)
   return dest
 end
 
@@ -273,7 +272,34 @@ function Base.copyto!(dest::CuArray{T}, doffs::Integer, src::CuArray{T}, soffs::
   @boundscheck checkbounds(dest, doffs+n-1)
   @boundscheck checkbounds(src, soffs)
   @boundscheck checkbounds(src, soffs+n-1)
+  unsafe_copyto!(dest, doffs, src, soffs, n)
+  return dest
+end
+
+function Base.unsafe_copyto!(dest::CuArray{T}, doffs, src::Array{T}, soffs, n) where T
   unsafe_copyto!(pointer(dest, doffs), pointer(src, soffs), n)
+  if Base.isbitsunion(T)
+    # copy selector bytes
+    error("Not implemented")
+  end
+  return dest
+end
+
+function Base.unsafe_copyto!(dest::Array{T}, doffs, src::CuArray{T}, soffs, n) where T
+  unsafe_copyto!(pointer(dest, doffs), pointer(src, soffs), n)
+  if Base.isbitsunion(T)
+    # copy selector bytes
+    error("Not implemented")
+  end
+  return dest
+end
+
+function Base.unsafe_copyto!(dest::CuArray{T}, doffs, src::CuArray{T}, soffs, n) where T
+  unsafe_copyto!(pointer(dest, doffs), pointer(src, soffs), n)
+  if Base.isbitsunion(T)
+    # copy selector bytes
+    error("Not implemented")
+  end
   return dest
 end
 
@@ -286,6 +312,8 @@ end
 ## utilities
 
 cu(xs) = adapt(CuArray{Float32}, xs)
+cu(::Type{Array{T,N}}) where {T,N} = CuArray{T,N,Nothing}
+cu(::Type{Array{T}}) where {T} = CuArray{T}
 Base.getindex(::typeof(cu), xs...) = CuArray([xs...])
 
 zeros(T::Type, dims...) = fill!(CuArray{T}(undef, dims...), 0)
@@ -433,4 +461,37 @@ function Base.reverse(input::CuVector{T}, start=1, stop=length(input)) where {T}
     stop < length(input) && copyto!(output, stop+1, input, stop+1)
 
     return output
+end
+
+
+## resizing
+
+"""
+  resize!(a::CuVector, n::Int)
+
+Resize `a` to contain `n` elements. If `n` is smaller than the current collection length,
+the first `n` elements will be retained. If `n` is larger, the new elements are not
+guaranteed to be initialized.
+
+Several restrictions apply to which types of `CuArray`s can be resized:
+
+- the array should be backed by the memory pool, and not have been constructed with `unsafe_wrap`
+- the array cannot be derived (view, reshape) from another array
+- the array cannot have any derived arrays itself
+
+"""
+function Base.resize!(A::CuVector{T}, n::Int) where T
+  A.parent === nothing || error("cannot resize derived CuArray")
+  A.refcount == 1 || error("cannot resize shared CuArray")
+  A.pooled || error("cannot resize wrapped CuArray")
+
+  ptr = convert(CuPtr{T}, alloc(n * sizeof(T)))
+  m = min(length(A), n)
+  unsafe_copyto!(ptr, pointer(A), m)
+
+  free(convert(CuPtr{Nothing}, pointer(A)))
+  A.dims = (n,)
+  A.ptr = ptr
+
+  A
 end

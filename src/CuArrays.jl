@@ -32,10 +32,6 @@ include("linalg.jl")
 
 include("gpuarray_interface.jl")
 
-# many libraries need to be initialized per-device (per-context, really, but we assume users
-# of CuArrays and/or CUDAnative only use a single context), so keep track of the active one.
-const active_context = Ref{CuContext}()
-
 include("blas/CUBLAS.jl")
 include("sparse/CUSPARSE.jl")
 include("solver/CUSOLVER.jl")
@@ -55,14 +51,13 @@ const __initialized__ = Ref(false)
 functional() = __initialized__[]
 
 export has_cudnn, has_cutensor
-const libraries = Dict{String,Union{String,Nothing}}()
-has_cudnn() = libraries["cudnn"] !== nothing && CUDNN.libcudnn !== nothing
-has_cutensor() = libraries["cutensor"] !== nothing && CUTENSOR.libcutensor !== nothing
+has_cudnn() = Libdl.dlopen_e(CUDNN.libcudnn[]) !== C_NULL
+has_cutensor() = Libdl.dlopen_e(CUTENSOR.libcutensor[]) !== C_NULL
 
 function __init__()
-    silent = parse(Bool, get(ENV, "JULIA_CUDA_SILENT", "false"))
-    verbose = parse(Bool, get(ENV, "JULIA_CUDA_VERBOSE", "false"))
     precompiling = ccall(:jl_generating_output, Cint, ()) != 0
+    silent = parse(Bool, get(ENV, "JULIA_CUDA_SILENT", "false")) || precompiling
+    verbose = parse(Bool, get(ENV, "JULIA_CUDA_VERBOSE", "false"))
 
     # if any dependent GPU package failed, expect it to have logged an error and bail out
     if !CUDAdrv.functional() || !CUDAnative.functional()
@@ -76,18 +71,20 @@ function __init__()
         for name in ("cublas", "cusparse", "cusolver", "cufft", "curand", "cudnn", "cutensor")
             mod = getfield(CuArrays, Symbol(uppercase(name)))
             lib = Symbol("lib$name")
-            path = find_cuda_library(name, toolkit)
-            libraries[name] = path
+            handle = getfield(mod, lib)
 
-            # only push the load path if we couldn't find the library
-            if path !== nothing
-                file = basename(path)
-                handle = first(split(file,'.'))
-                if Libdl.dlopen_e(handle) == C_NULL
-                    dir = dirname(path)
-                    if !(dir in Libdl.DL_LOAD_PATH)
-                        push!(Libdl.DL_LOAD_PATH, dir)
-                    end
+            # on Windows, the library name is version dependent
+            if Sys.iswindows()
+                cuda = CUDAnative.version()
+                suffix = cuda >= v"10.1" ? "$(cuda.major)" : "$(cuda.major)$(cuda.minor)"
+                handle[] = "$(name)$(Sys.WORD_SIZE)_$(suffix)"
+            end
+
+            # check if we can't find the library
+            if Libdl.dlopen_e(handle[]) == C_NULL
+                path = find_cuda_library(name, toolkit)
+                if path !== nothing
+                    handle[] = path
                 end
             end
         end
@@ -102,45 +99,39 @@ function __init__()
 
         # library compatibility
         if has_cutensor()
-            ver = CUTENSOR.version()
-            if ver.major != 0 || ver.minor != 2
-                error("CuArrays.jl only supports CUTENSOR 0.2")
+            cutensor = CUTENSOR.version()
+            if cutensor < v"1"
+                silent || @warn("CuArrays.jl only supports CUTENSOR 1.0 or higher")
+            end
+
+            cuda = CUDAnative.version()
+            cutensor_cuda = CUDNN.cuda_version()
+            if cutensor_cuda.major != cuda.major || cutensor_cuda.minor != cuda.minor
+                silent || @warn("You are using CUTENSOR $cutensor for CUDA $cutensor_cuda with CUDA toolkit $cuda; these might be incompatible.")
+            end
+        end
+        if has_cudnn()
+            cudnn = CUDNN.version()
+            if cudnn < v"7.6"
+                silent || @warn("CuArrays.jl only supports CUDNN v7.6 or higher")
+            end
+
+            cuda = CUDAnative.version()
+            cudnn_cuda = CUDNN.cuda_version()
+            if cudnn_cuda.major != cuda.major || cudnn_cuda.minor != cuda.minor
+                silent || @warn("You are using CUDNN $cudnn for CUDA $cudnn_cuda with CUDA toolkit $cuda; these might be incompatible.")
             end
         end
 
         # package integrations
         @require ForwardDiff="f6369f11-7733-5829-9624-2563aa707210" include("forwarddiff.jl")
 
-        # update the active context when we switch devices
-        callback = (::CuDevice, ctx::CuContext) -> begin
-            active_context[] = ctx
-
-            # wipe the active handles
-            CUBLAS._handle[] = C_NULL
-            CUBLAS._xt_handle[] = C_NULL
-            CUSOLVER._dense_handle[] = C_NULL
-            CUSOLVER._sparse_handle[] = C_NULL
-            CUSPARSE._handle[] = C_NULL
-            CURAND._generator[] = nothing
-            CUDNN._handle[] = C_NULL
-            CUTENSOR._handle[] = C_NULL
-        end
-        push!(CUDAnative.device!_listeners, callback)
-
-        # a device might be active already
-        existing_ctx = CUDAdrv.CuCurrentContext()
-        if existing_ctx !== nothing
-            active_context[] = existing_ctx
-        end
-
         __init_memory__()
 
         __initialized__[] = true
     catch ex
         # don't actually fail to keep the package loadable
-        silent = parse(Bool, get(ENV, "JULIA_CUDA_SILENT", "false"))
-        if !silent && !precompiling
-            verbose = parse(Bool, get(ENV, "JULIA_CUDA_VERBOSE", "false"))
+        if !silent
             if verbose
                 @error "CuArrays.jl failed to initialize" exception=(ex, catch_backtrace())
             else

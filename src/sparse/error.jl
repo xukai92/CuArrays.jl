@@ -2,52 +2,46 @@ export CUSPARSEError
 
 struct CUSPARSEError <: Exception
     code::cusparseStatus_t
-    msg::AbstractString
-end
-Base.show(io::IO, err::CUSPARSEError) = print(io, "CUSPARSEError(code $(err.code), $(err.msg))")
-
-function CUSPARSEError(code::cusparseStatus_t)
-    msg = status_message(code)
-    return CUSPARSEError(code, msg)
 end
 
-function status_message( status )
-    if status == CUSPARSE_STATUS_SUCCESS
-        return "success"
-    end
-    if status == CUSPARSE_STATUS_NOT_INITIALIZED
-        return "not initialized"
-    end
-    if status == CUSPARSE_STATUS_ALLOC_FAILED
-        return "allocation failed"
-    end
-    if status == CUSPARSE_STATUS_INVALID_VALUE
-        return "invalid value"
-    end
-    if status == CUSPARSE_STATUS_ARCH_MISMATCH
-        return "architecture mismatch"
-    end
-    if status == CUSPARSE_STATUS_MAPPING_ERROR
-        return "mapping error"
-    end
-    if status == CUSPARSE_STATUS_EXECUTION_FAILED
-        return "execution failed"
-    end
-    if status == CUSPARSE_STATUS_INTERNAL_ERROR
-        return "internal error"
-    end
-    if status == CUSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED
-        return "matrix type not supported"
-    end
+Base.convert(::Type{cusparseStatus_t}, err::CUSPARSEError) = err.code
+
+Base.showerror(io::IO, err::CUSPARSEError) =
+    print(io, "CUSPARSEError: ", description(err), " (code $(reinterpret(Int32, err.code)), $(name(err)))")
+
+name(err::CUSPARSEError) = unsafe_string(cusparseGetErrorName(err))
+
+description(err::CUSPARSEError) = unsafe_string(cusparseGetErrorString(err))
+
+
+## API call wrapper
+
+# API calls that are allowed without a functional context
+const preinit_apicalls = Set{Symbol}([
+    :cusparseGetVersion,
+    :cusparseGetProperty,
+    :cusparseGetErrorName,
+    :cusparseGetErrorString,
+])
+
+# outlined functionality to avoid GC frame allocation
+@noinline function throw_api_error(res)
+    throw(CUSPARSEError(res))
 end
 
-macro check(sparse_func)
+macro check(ex)
+    fun = Symbol(decode_ccall_function(ex))
+    init = if !in(fun, preinit_apicalls)
+        :(CUDAnative.maybe_initialize())
+    end
     quote
-        local err = $(esc(sparse_func::Expr))
-        if err != CUSPARSE_STATUS_SUCCESS
-            throw(CUSPARSEError(cusparseStatus_t(err)))
+        $init
+
+        res = $(esc(ex))
+        if res != CUSPARSE_STATUS_SUCCESS
+            throw_api_error(res)
         end
-        err
+
+        return
     end
 end
-
