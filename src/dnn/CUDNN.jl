@@ -21,7 +21,7 @@ const libcudnn = Ref("libcudnn")
 # control of deterministic
 const deterministic = Ref(true)
 isdeterministic() = deterministic[]
-deterministic!(flag) = (deterministic[] = flag)
+deterministic!(flag = true) = (deterministic[] = flag)
 
 # core library
 include("libcudnn_common.jl")
